@@ -1,0 +1,8 @@
+# ---- build artifacts --------------------------------------------------
+*.o
+*.d
+loom
+
+# ---- runtime data (yours, not source) ---------------------------------
+save.dat
+settings.cfg
