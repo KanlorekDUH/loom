@@ -20,7 +20,7 @@ carry your throughput along the threads.
 - **Feel** — synthesised sound effects, sale sparks and glowing item dots.
 - Screens switch instantly (no transition fade).
 
-**Version: `V0.0.6`** (shown greyed out in the bottom-left corner).
+**Version: `V0.0.7`** (shown greyed out in the bottom-left corner).
 
 ## Feel
 
@@ -86,15 +86,18 @@ ORE ──▶ MINER
        FORGE ──PLATE──▶ BROKER     ($30)
 ```
 
-| Node | Takes | Makes | Every | Value | Cost (2nd on) | Notes |
-|------|-------|-------|-------|-------|---------------|-------|
-| **MINER**   | —     | ORE   | 1.8 s | —  | $25 | starts unlocked |
-| **SMELTER** | ORE   | INGOT | 1.4 s | —  | $40 | starts unlocked |
-| **SELLER**  | INGOT | money | 0.5 s | $8 | $20 | starts unlocked |
-| **SILO**    | ORE   | ORE   | 0.2 s | —  | $45 | starts unlocked; buffers 8 |
-| **FORGE**   | INGOT | PLATE | 2.4 s | —  | $80 | **research to unlock** |
-| **BROKER**  | PLATE | money | 0.6 s | $30 | $60 | **research to unlock** |
-| **BOOSTER** | —     | —     | —     | —  | $150 | **research to unlock**; +25 % speed to nodes within 4 cells |
+| Node | Size | Takes | Makes | Every | Value | Cost (2nd on) | Notes |
+|------|------|-------|-------|-------|-------|---------------|-------|
+| **MINER**   | 4×2 | —     | ORE   | 1.8 s | —  | $25 | starts unlocked |
+| **SMELTER** | 4×2 | ORE   | INGOT | 1.4 s | —  | $40 | starts unlocked |
+| **SELLER**  | 3×2 | INGOT | money | 0.5 s | $8 | $20 | starts unlocked |
+| **SILO**    | 2×3 | ORE   | ORE   | 0.2 s | —  | $45 | starts unlocked; buffers 8 |
+| **FORGE**   | 5×2 | INGOT | PLATE | 2.4 s | —  | $80 | **research to unlock** |
+| **BROKER**  | 4×2 | PLATE | money | 0.6 s | $30 | $60 | **research to unlock** |
+| **BOOSTER** | 2×2 | —     | —     | —     | —  | $150 | **research to unlock**; +25 % speed to nodes within 4 cells |
+
+Nodes occupy **different footprints**, and each draws a faint **inner grid** showing
+the cells it covers.
 
 - The **first** node of each type is **free**; each later one costs more.
 - **Selling earns money *and* Research Points** — money buys nodes, RP buys research.
@@ -133,6 +136,7 @@ with the wheel). Entries with a prerequisite show `LOCKED` until it's bought.
 | Right click                       | Delete a node or wire; on empty space it puts the armed tool away |
 | Right drag from empty space       | Pan                             |
 | Middle drag                       | Pan                             |
+| **`W` `A` `S` `D`**               | Pan the camera                  |
 | **Scroll wheel**                  | **Zoom** (over the board) / **scroll the list** (over RESEARCH) |
 | `Esc`                             | Menu over a blurred board (press again to resume) |
 

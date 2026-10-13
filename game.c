@@ -28,11 +28,15 @@
 #define MAX_PACKETS 256
 #define MAX_POPUPS  32
 
-#define BW 4   /* block width  in grid cells */
-#define BH 2   /* block height in grid cells */
-
 #define ZOOM_MIN 0.2f
 #define ZOOM_MAX 2.0f
+
+/* Level of detail: below these zooms tiny details are dropped rather than
+   drawn as an unreadable smudge. */
+#define LOD_LABEL_ZOOM 0.30f   /* block name                    */
+#define LOD_RATE_ZOOM  0.45f   /* throughput text (smallest)    */
+#define LOD_DOTS_ZOOM  0.40f   /* buffered-item dots            */
+#define LOD_GRID_ZOOM  0.35f   /* inner cell grid               */
 
 /* ---- Types ------------------------------------------------------------ */
 typedef enum { ITEM_NONE = -1, ITEM_ORE = 0, ITEM_INGOT, ITEM_PLATE } ItemType;
@@ -62,17 +66,18 @@ typedef struct {
     ItemType provides;
     int    cap;         /* buffer size on each side       */
     int    value;       /* money per sale (sellers only)  */
+    int    w, h;        /* footprint, in grid cells       */
 } NodeDef;
 
 static const NodeDef g_defs[NODE_TYPE_COUNT] = {
-    /* name       colour                    interval base growth accepts     provides    cap val */
-    { "MINER",   { 232, 168,  96, 255 },     1.8f,  25, 1.55f, ITEM_NONE,  ITEM_ORE,     3,  0 },
-    { "SMELTER", { 118, 140, 242, 255 },     1.4f,  40, 1.60f, ITEM_ORE,   ITEM_INGOT,   3,  0 },
-    { "SELLER",  {  92, 180, 150, 255 },     0.5f,  20, 1.50f, ITEM_INGOT, ITEM_NONE,    3,  8 },
-    { "SILO",    { 152, 154, 176, 255 },     0.2f,  45, 1.55f, ITEM_ORE,   ITEM_ORE,     8,  0 },
-    { "FORGE",   { 214, 128,  92, 255 },     2.4f,  80, 1.60f, ITEM_INGOT, ITEM_PLATE,   3,  0 },
-    { "BROKER",  { 232, 200, 110, 255 },     0.6f,  60, 1.55f, ITEM_PLATE, ITEM_NONE,    3, 30 },
-    { "BOOSTER", { 170, 130, 232, 255 },     0.0f, 150, 1.80f, ITEM_NONE,  ITEM_NONE,    0,  0 },
+    /* name       colour                    interval base growth accepts     provides    cap val  w  h */
+    { "MINER",   { 232, 168,  96, 255 },     1.8f,  25, 1.55f, ITEM_NONE,  ITEM_ORE,     3,  0, 4, 2 },
+    { "SMELTER", { 118, 140, 242, 255 },     1.4f,  40, 1.60f, ITEM_ORE,   ITEM_INGOT,   3,  0, 4, 2 },
+    { "SELLER",  {  92, 180, 150, 255 },     0.5f,  20, 1.50f, ITEM_INGOT, ITEM_NONE,    3,  8, 3, 2 },
+    { "SILO",    { 152, 154, 176, 255 },     0.2f,  45, 1.55f, ITEM_ORE,   ITEM_ORE,     8,  0, 2, 3 },
+    { "FORGE",   { 214, 128,  92, 255 },     2.4f,  80, 1.60f, ITEM_INGOT, ITEM_PLATE,   3,  0, 5, 2 },
+    { "BROKER",  { 232, 200, 110, 255 },     0.6f,  60, 1.55f, ITEM_PLATE, ITEM_NONE,    3, 30, 4, 2 },
+    { "BOOSTER", { 170, 130, 232, 255 },     0.0f, 150, 1.80f, ITEM_NONE,  ITEM_NONE,    0,  0, 2, 2 },
 };
 
 #define SELL_BONUS    2       /* money added by the SELL PRICE research */
@@ -199,12 +204,23 @@ static float ClampF(float v, float lo, float hi) { return v < lo ? lo : (v > hi 
 static float CellPx(void) { return GridCell() * g_zoom; }
 static bool  ShiftDown(void) { return IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT); }
 
-/* Detail — node dots, text, item dots — follows the zoom, clamped so it stays
-   legible when zoomed far out. */
-static float ZoomScale(void) { return ClampF(g_zoom, 0.4f, 1.4f); }
+/* Detail — node dots, text, item dots — tracks the zoom. Shrinking is
+   proportional, so it stays correct when zoomed far out; growing is capped so
+   the bitmap font stays crisp. Anything too small to read is dropped outright
+   by the LOD checks in DrawBlock. */
+static float ZoomScale(void)
+{
+    return (g_zoom < 1.0f) ? g_zoom : ClampF(g_zoom, 1.0f, 1.4f);
+}
 
 /* ---- Geometry --------------------------------------------------------- */
-static Vector2 BlockSize(void) { float c = CellPx(); return (Vector2){ BW * c, BH * c }; }
+static Vector2 BlockSizeOf(NodeType t)
+{
+    float c = CellPx();
+    return (Vector2){ g_defs[t].w * c, g_defs[t].h * c };
+}
+
+static Vector2 BlockSizeAt(int i) { return BlockSizeOf(g_blocks[i].type); }
 
 static Vector2 BlockOrigin(int i)
 {
@@ -214,17 +230,17 @@ static Vector2 BlockOrigin(int i)
 
 static Vector2 InNode(int i)
 {
-    Vector2 o = BlockOrigin(i), s = BlockSize();
+    Vector2 o = BlockOrigin(i), s = BlockSizeAt(i);
     return (Vector2){ o.x, o.y + s.y * 0.5f };
 }
 
 static Vector2 OutNode(int i)
 {
-    Vector2 o = BlockOrigin(i), s = BlockSize();
+    Vector2 o = BlockOrigin(i), s = BlockSizeAt(i);
     return (Vector2){ o.x + s.x, o.y + s.y * 0.5f };
 }
 
-static float NodeRadius(void) { return 7.0f * UiScale() * ZoomScale(); }
+static float NodeRadius(void) { return fmaxf(1.0f, 7.0f * UiScale() * ZoomScale()); }
 
 static void WireControls(Vector2 a, Vector2 b, Vector2 *c1, Vector2 *c2)
 {
@@ -460,8 +476,8 @@ static void SpawnPopup(int block, int amount)
 
 static void SpawnBurst(int block, Color color, int count)
 {
-    Vector2 c = { g_blocks[block].col + BW * 0.5f,
-                  g_blocks[block].row + BH * 0.5f };
+    Vector2 c = { g_blocks[block].col + g_defs[g_blocks[block].type].w * 0.5f,
+                  g_blocks[block].row + g_defs[g_blocks[block].type].h * 0.5f };
 
     for (int n = 0; n < count; n++) {
         for (int p = 0; p < MAX_PARTICLES; p++) {
@@ -482,9 +498,9 @@ static void SpawnBurst(int block, Color color, int count)
 /* ---- Hit testing ------------------------------------------------------ */
 static int BlockAt(Vector2 p)
 {
-    Vector2 s = BlockSize();
     for (int i = 0; i < MAX_BLOCKS; i++) {
         if (!g_blocks[i].active) continue;
+        Vector2 s = BlockSizeAt(i);
         Vector2 o = BlockOrigin(i);
         if (CheckCollisionPointRec(p, (Rectangle){ o.x, o.y, s.x, s.y })) return i;
     }
@@ -910,6 +926,22 @@ void GameUpdate(float dt)
         g_pan.y += d.y;
     }
 
+    /* ---- WASD camera panning ------------------------------------------ */
+    {
+        Vector2 d = { 0.0f, 0.0f };
+        if (IsKeyDown(KEY_A)) d.x += 1.0f;
+        if (IsKeyDown(KEY_D)) d.x -= 1.0f;
+        if (IsKeyDown(KEY_W)) d.y += 1.0f;
+        if (IsKeyDown(KEY_S)) d.y -= 1.0f;
+
+        float len = sqrtf(d.x * d.x + d.y * d.y);
+        if (len > 0.0f) {
+            float speed = 800.0f * UiScale();       /* screen px per second */
+            g_pan.x += (d.x / len) * speed * dt;
+            g_pan.y += (d.y / len) * speed * dt;
+        }
+    }
+
     /* ---- Bottom bar: view tabs (node placement is mouse-only) ---------- */
     if (IsKeyPressed(KEY_ONE)) g_tab = TAB_BUILD;
     if (IsKeyPressed(KEY_TWO)) g_tab = TAB_RESEARCH;
@@ -946,14 +978,15 @@ void GameUpdate(float dt)
                    disarms. Hold Shift to keep placing several. */
                 int cost = NodeCost(g_selType);
                 if (g_unlocked[g_selType] && cost <= g_money) {
-                    int idx = PlaceNode(g_selType, MouseCellX() - BW / 2,
-                                                     MouseCellY() - BH / 2);
+                    int idx = PlaceNode(g_selType,
+                                        MouseCellX() - g_defs[g_selType].w / 2,
+                                        MouseCellY() - g_defs[g_selType].h / 2);
                     if (idx >= 0) {
                         g_money -= cost;
                         g_drag = DRAG_BLOCK;
                         g_dragBlock = idx;
-                        g_grabCol = BW / 2;
-                        g_grabRow = BH / 2;
+                        g_grabCol = g_defs[g_selType].w / 2;
+                        g_grabRow = g_defs[g_selType].h / 2;
                         SfxPlace();
                         if (!ShiftDown()) g_placing = false;
                     }
@@ -1002,66 +1035,86 @@ static void DrawBlock(int i)
 {
     Block *b = &g_blocks[i];
     const NodeDef *def = &g_defs[b->type];
-    Vector2 o = BlockOrigin(i), s = BlockSize();
+    Vector2 o = BlockOrigin(i), s = BlockSizeAt(i);
     Rectangle r = { o.x, o.y, s.x, s.y };
 
     DrawRectangleRec(r, COL_BTN);
+
+    /* Inner grid — a hint of the cells this node occupies, a touch brighter
+       than the face. Fades out when zoomed too far to read it. */
+    if (g_zoom >= LOD_GRID_ZOOM && (def->w > 1 || def->h > 1)) {
+        float c = CellPx();
+        Color gc = { 255, 255, 255, 22 };
+        for (int k = 1; k < def->w; k++)
+            DrawRectangle((int)(r.x + k * c), (int)r.y, 1, (int)r.height, gc);
+        for (int k = 1; k < def->h; k++)
+            DrawRectangle((int)r.x, (int)(r.y + k * c), (int)r.width, 1, gc);
+    }
 
     /* Jam / idle feedback: a full output glows amber, an idle input dims blue. */
     bool blocked = (def->provides != ITEM_NONE) && (b->outCount >= def->cap);
     bool starved = !blocked && (def->accepts != ITEM_NONE) &&
                    (b->inCount == 0) && (b->work <= 0.0f);
 
+    float zs = ZoomScale();              /* detail weight, proportional to zoom */
+    float bw = ClampF(g_zoom, 0.6f, 1.4f);   /* border weight                    */
+
     Color border = { def->color.r, def->color.g, def->color.b, 150 };
-    float borderThick = fmaxf(1.0f, S(1.0f));
+    float borderThick = fmaxf(1.0f, S(1.0f) * bw);
     if (blocked) {
         float pulse = 0.55f + 0.45f * sinf(g_time * 5.0f);
         border = (Color){ 236, 176, 96, (unsigned char)(110 + 110 * pulse) };
-        borderThick = fmaxf(2.0f, S(2.0f));
+        borderThick = fmaxf(1.5f, S(2.0f) * bw);
     } else if (starved) {
         border = (Color){ 120, 136, 190, 95 };
     }
     DrawRectangleLinesEx(r, borderThick, border);
-    DrawRectangle((int)r.x, (int)r.y, (int)fmaxf(2.0f, S(3.0f)), (int)r.height, def->color);
+    /* Coloured tab down the left edge — the type cue that survives zooming out. */
+    DrawRectangle((int)r.x, (int)r.y, (int)fmaxf(2.0f, S(3.0f) * zs), (int)r.height, def->color);
 
     /* Progress bar for the current operation. */
     float iv = EffectiveInterval(b);
     if (b->work > 0.0f && iv > 0.0f) {
         float p = 1.0f - b->work / iv;
-        DrawRectangle((int)r.x, (int)(r.y + r.height - S(4.0f)),
-                      (int)(r.width * ClampF(p, 0.0f, 1.0f)), (int)fmaxf(2.0f, S(3.0f)),
-                      def->color);
+        DrawRectangle((int)r.x, (int)(r.y + r.height - fmaxf(1.0f, S(4.0f) * zs)),
+                      (int)(r.width * ClampF(p, 0.0f, 1.0f)),
+                      (int)fmaxf(1.0f, S(3.0f) * zs), def->color);
     }
 
-    /* Label, with the throughput underneath it. */
-    float zoomTxt = ZoomScale();
-    float fs = FONT_ROW_SIZE * UiScale() * 0.8f * zoomTxt;
-    Vector2 ts = MeasureTextEx(g_font, b->label, fs, 1.0f);
-    DrawTextEx(g_font, b->label,
-               (Vector2){ r.x + (r.width - ts.x) * 0.5f, r.y + (r.height - ts.y) * 0.5f },
-               fs, 1.0f, COL_BTN_TEXT);
+    /* Name — dropped once it would just be a smudge. */
+    if (g_zoom >= LOD_LABEL_ZOOM) {
+        float fs = FONT_ROW_SIZE * UiScale() * 0.8f * zs;
+        Vector2 ts = MeasureTextEx(g_font, b->label, fs, 1.0f);
+        DrawTextEx(g_font, b->label,
+                   (Vector2){ r.x + (r.width - ts.x) * 0.5f, r.y + (r.height - ts.y) * 0.5f },
+                   fs, 1.0f, COL_BTN_TEXT);
+    }
 
-    char rate[24];
-    snprintf(rate, sizeof(rate), "%d/M", (int)lroundf(b->rate * 60.0f));
-    float rs = FONT_UI_SIZE * UiScale() * 0.85f * zoomTxt;
-    Vector2 rt = MeasureTextEx(g_font, rate, rs, 1.0f);
-    DrawTextEx(g_font, rate,
-               (Vector2){ r.x + (r.width - rt.x) * 0.5f, r.y + r.height * 0.70f },
-               rs, 1.0f, (Color){ 150, 156, 180, 190 });
+    /* Throughput — dropped sooner; it is the smallest text of all. */
+    if (g_zoom >= LOD_RATE_ZOOM) {
+        char rate[24];
+        snprintf(rate, sizeof(rate), "%d/M", (int)lroundf(b->rate * 60.0f));
+        float rs = FONT_UI_SIZE * UiScale() * 0.85f * zs;
+        Vector2 rt = MeasureTextEx(g_font, rate, rs, 1.0f);
+        DrawTextEx(g_font, rate,
+                   (Vector2){ r.x + (r.width - rt.x) * 0.5f, r.y + r.height * 0.70f },
+                   rs, 1.0f, (Color){ 150, 156, 180, 190 });
+    }
 
     /* Buffered items: input along the top-left, output along the top-right. */
-    float zs   = ZoomScale();
-    float dot  = fmaxf(1.0f, S(4.0f) * zs);
-    float step = dot * 3.0f;
-    float dox  = S(14.0f) * zs;
-    float doy  = S(12.0f) * zs;
-    for (int k = 0; k < b->inCount; k++) {
-        if (def->accepts == ITEM_NONE) break;
-        DrawCircleV((Vector2){ r.x + dox + k * step, r.y + doy }, dot, ItemColor(def->accepts));
-    }
-    for (int k = 0; k < b->outCount; k++) {
-        if (def->provides == ITEM_NONE) break;
-        DrawCircleV((Vector2){ r.x + r.width - dox - k * step, r.y + doy }, dot, ItemColor(def->provides));
+    if (g_zoom >= LOD_DOTS_ZOOM) {
+        float dot  = fmaxf(1.0f, S(4.0f) * zs);
+        float step = dot * 2.6f;      /* fits 8 items inside the smallest node */
+        float dox  = S(14.0f) * zs;
+        float doy  = S(12.0f) * zs;
+        for (int k = 0; k < b->inCount; k++) {
+            if (def->accepts == ITEM_NONE) break;
+            DrawCircleV((Vector2){ r.x + dox + k * step, r.y + doy }, dot, ItemColor(def->accepts));
+        }
+        for (int k = 0; k < b->outCount; k++) {
+            if (def->provides == ITEM_NONE) break;
+            DrawCircleV((Vector2){ r.x + r.width - dox - k * step, r.y + doy }, dot, ItemColor(def->provides));
+        }
     }
 }
 
@@ -1232,7 +1285,7 @@ static void DrawBars(void)
 void GameDraw(void)
 {
     Vector2 mouse = GetMousePosition();
-    float thick = fmaxf(2.0f, S(2.0f) * ClampF(g_zoom, 0.8f, 1.6f));
+    float thick = fmaxf(1.2f, S(2.0f) * ClampF(g_zoom, 0.5f, 1.6f));
 
     GridDraw(g_pan.x, g_pan.y, g_zoom);
 
@@ -1265,9 +1318,9 @@ void GameDraw(void)
     /* Ghost preview of the node about to be placed. */
     if (g_placing && g_drag == DRAG_NONE && !CheckCollisionPointRec(mouse, g_hotbar) &&
         OutNodeAt(mouse) < 0 && BlockAt(mouse) < 0) {
-        Vector2 o = { (MouseCellX() - BW / 2) * CellPx() + g_pan.x,
-                      (MouseCellY() - BH / 2) * CellPx() + g_pan.y };
-        Vector2 s = BlockSize();
+        Vector2 o = { (MouseCellX() - g_defs[g_selType].w / 2) * CellPx() + g_pan.x,
+                      (MouseCellY() - g_defs[g_selType].h / 2) * CellPx() + g_pan.y };
+        Vector2 s = BlockSizeOf((NodeType)g_selType);
         Color c = g_defs[g_selType].color;
         c.a = (NodeCost((NodeType)g_selType) <= g_money) ? 90 : 35;
         DrawRectangleLinesEx((Rectangle){ o.x, o.y, s.x, s.y }, fmaxf(1.0f, S(2.0f)), c);
@@ -1283,7 +1336,7 @@ void GameDraw(void)
         WireControls(a, b, &c1, &c2);
         Vector2 pos = GetSplinePointBezierCubic(a, c1, c2, b,
                                                 ArcToT(a, c1, c2, b, g_packets[p].t));
-        float pr = fmaxf(3.0f, NodeRadius() * 0.7f);
+        float pr = fmaxf(1.5f, NodeRadius() * 0.7f);
         Color ic = ItemColor(g_packets[p].item);
         DrawCircleV(pos, pr * 2.8f, (Color){ ic.r, ic.g, ic.b, 45 });
         DrawCircleV(pos, pr * 1.7f, (Color){ ic.r, ic.g, ic.b, 80 });
@@ -1293,7 +1346,7 @@ void GameDraw(void)
     /* Booster range rings, behind everything else. */
     for (int i = 0; i < MAX_BLOCKS; i++) {
         if (!g_blocks[i].active || g_blocks[i].type != NODE_BOOSTER) continue;
-        Vector2 o = BlockOrigin(i), s = BlockSize();
+        Vector2 o = BlockOrigin(i), s = BlockSizeAt(i);
         Vector2 c = { o.x + s.x * 0.5f, o.y + s.y * 0.5f };
         DrawCircleLinesV(c, BOOST_RADIUS * CellPx(), (Color){ 170, 130, 232, 55 });
     }
@@ -1324,7 +1377,7 @@ void GameDraw(void)
         int bi = g_popups[p].block;
         if (!g_blocks[bi].active) { g_popups[p].active = false; continue; }
 
-        Vector2 o = BlockOrigin(bi), s = BlockSize();
+        Vector2 o = BlockOrigin(bi), s = BlockSizeAt(bi);
         char buf[16];
         snprintf(buf, sizeof(buf), "+$%d", g_popups[p].amount);
         float fs = FONT_UI_SIZE * UiScale();

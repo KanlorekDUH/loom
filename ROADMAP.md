@@ -11,6 +11,21 @@ git checkout v0.0.7 && make run
 
 ## Shipped
 
+### v0.0.7 — camera, node variety & zoom-out rendering
+- **WASD camera panning** (freed up by v0.0.6). Drag-panning still works.
+- **Nodes of different sizes.** MINER / SMELTER / BROKER are 4×2, SELLER 3×2,
+  FORGE 5×2, SILO 2×3, BOOSTER 2×2. Size comes from the node type, so the save
+  format needed no migration.
+- **Zoomed-out rendering fixed.** Detail was clamped to a floor of 0.4 while
+  blocks shrink with zoom, so at 20% node dots, item dots and text were about
+  **twice** their correct size — connector dots overlapped and labels
+  overflowed. Detail now scales proportionally, and level-of-detail drops the
+  throughput text, then the label, then the buffer dots below set zoom
+  thresholds, keeping a minimum dot size so wires still read as connected.
+- **Node inner grid** — faint cell divisions inside each node, a touch brighter
+  than its face, so a node reads as the block of grid cells it occupies.
+  Fades out when zoomed out.
+
 ### v0.0.6 — fixes & tweaks
 - Removed the keyboard node-placement shortcuts (`Q W E R T Y U…`); placing is
   mouse-only, which also frees **W A S D** for the camera later.
@@ -24,13 +39,6 @@ git checkout v0.0.7 && make run
 ---
 
 ## Planned
-
-### v0.0.7 — camera & node variety
-- **WASD camera panning** (freed up by v0.0.6).
-- **Nodes of different sizes.** Size currently comes from the node type, and
-  the save format stores only `col`/`row`, so this needs **no save migration** —
-  but it touches all geometry (positions, hit-testing, wire anchors).
-  Sizes to be chosen to leave room for wider machines later.
 
 ### v0.0.8 — rewiring
 - **Drag off a connected input** to detach that link. Drop it on **another

@@ -9,7 +9,7 @@
 
 /* ---- Game ------------------------------------------------------------- */
 #define GAME_TITLE   "LOOM"
-#define GAME_VERSION "V0.0.6"
+#define GAME_VERSION "V0.0.7"
 
 /* ---- Responsive helpers ----------------------------------------------- */
 static inline float ScreenW(void) { return (float)GetScreenWidth();  }
