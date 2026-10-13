@@ -9,18 +9,14 @@
 #include <math.h>
 #include <string.h>
 
-/* ---- Menu contents (labels are upper case) ---------------------------- */
-typedef struct {
-    const char *label;
-    MenuAction  action;
-} MenuItem;
-
-static const MenuItem g_items[] = {
-    { "START",    MENU_ACTION_START    },
+/* ---- Default contents, used until the caller supplies its own set ----- */
+static const MenuItem kDefaultItems[] = {
+    { "CONTINUE", MENU_ACTION_START    },
+    { "NEW SAVE", MENU_ACTION_NEW      },
     { "SETTINGS", MENU_ACTION_SETTINGS },
     { "EXIT",     MENU_ACTION_EXIT     },
 };
-#define ITEM_COUNT ((int)(sizeof(g_items) / sizeof(g_items[0])))
+#define DEFAULT_COUNT ((int)(sizeof(kDefaultItems) / sizeof(kDefaultItems[0])))
 
 /* ---- Layout tunables, in design px (scaled by UiScale) ---------------- */
 static const float GRID_SPEED_X =  9.0f;    /* px/s — slow, endless drift  */
@@ -29,7 +25,7 @@ static const float GRID_SPEED_Y =  6.0f;
 static const float BTN_W        = 260.0f;
 static const float BTN_H        =  54.0f;
 static const float BTN_SPACING  =  90.0f;
-static const float BTN_FIRST_Y  = 320.0f;   /* centre of the first button  */
+static const float BTN_CENTER_Y = 440.0f;   /* centre of the button group  */
 static const float TITLE_Y      = 210.0f;   /* centre of the title         */
 
 /* ---- Small helpers ---------------------------------------------------- */
@@ -58,14 +54,26 @@ void MenuInit(Menu *m, Font titleFont, Font buttonFont)
     memset(m, 0, sizeof(*m));
     m->titleFont  = titleFont;
     m->buttonFont = buttonFont;
-    m->itemCount  = ITEM_COUNT;
+    m->items      = kDefaultItems;
+    m->itemCount  = DEFAULT_COUNT;
     m->selected   = 0;
 }
 
-void MenuSetLabel(Menu *m, int index, const char *label)
+void MenuSetItems(Menu *m, const MenuItem *items, int count)
 {
-    if (index < 0 || index >= MENU_MAX_ITEMS) return;
-    m->labelOverride[index] = label;
+    if (items == NULL || count < 1) return;
+    if (count > MENU_MAX_ITEMS) count = MENU_MAX_ITEMS;
+
+    m->items     = items;
+    m->itemCount = count;
+    if (m->selected >= count) m->selected = 0;
+
+    /* Replay the intro so the new set eases in. */
+    m->intro = 0.0f;
+    for (int i = 0; i < MENU_MAX_ITEMS; i++) {
+        m->appear[i] = 0.0f;
+        m->hover[i]  = (i == m->selected) ? 1.0f : 0.0f;
+    }
 }
 
 void MenuUpdateGrid(Menu *m, float dt)
@@ -84,10 +92,13 @@ MenuAction MenuUpdate(Menu *m, float dt)
     m->time  += dt;
     m->intro  = Clamp01(m->intro + dt / 0.55f);
 
-    /* Button geometry: centred, evenly spaced. */
-    float bw = S(BTN_W), bh = S(BTN_H);
+    /* Button geometry: centred as a group, evenly spaced. */
+    float bw  = S(BTN_W), bh = S(BTN_H);
+    float gap = S(BTN_SPACING) - bh;
+    float groupH = m->itemCount * bh + (m->itemCount - 1) * gap;
+    float top    = S(BTN_CENTER_Y) - groupH * 0.5f;
     for (int i = 0; i < m->itemCount; i++) {
-        float cy = S(BTN_FIRST_Y) + i * S(BTN_SPACING);
+        float cy = top + bh * 0.5f + i * (bh + gap);
         m->rect[i] = (Rectangle){ (ScreenW() - bw) * 0.5f, cy - bh * 0.5f, bw, bh };
     }
 
@@ -124,7 +135,7 @@ MenuAction MenuUpdate(Menu *m, float dt)
     bool enter = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
                  IsKeyPressed(KEY_SPACE);
     if (click || enter)
-        action = g_items[m->selected].action;
+        action = m->items[m->selected].action;
 
     /* ---- Ease each item's highlight toward the selected one ----------- */
     float k = 1.0f - expf(-12.0f * dt);
@@ -186,7 +197,7 @@ static void DrawButton(const Menu *m, int i)
     }
 
     /* Label, centred. */
-    const char *label = m->labelOverride[i] ? m->labelOverride[i] : g_items[i].label;
+    const char *label = m->items[i].label;
     float size = S(FONT_BUTTON_SIZE);
     Vector2 ts = MeasureTextEx(m->buttonFont, label, size, S(1.0f));
     Vector2 tp = { rr.x + (rr.width  - ts.x) * 0.5f,

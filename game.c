@@ -675,7 +675,8 @@ static void Simulate(float dt)
 }
 
 /* ---- Public API ------------------------------------------------------- */
-void GameInit(Font font)
+/* Wipe the board back to a fresh start: no money, no research, no nodes. */
+void GameNew(void)
 {
     memset(g_blocks,  0, sizeof(g_blocks));
     memset(g_links,   0, sizeof(g_links));
@@ -700,9 +701,12 @@ void GameInit(Font font)
     g_drag    = DRAG_NONE;
     g_panning = false;
     g_placing = false;
-    g_font    = font;
+}
 
-    /* The board starts empty — the first node of each type is free. */
+void GameInit(Font font)
+{
+    g_font = font;
+    GameNew();
 }
 
 void GameSeedDemo(void)
@@ -733,6 +737,14 @@ static bool SaveFilePath(char *buf, size_t n)
 {
     snprintf(buf, n, "%s%s", GetApplicationDirectory(), SAVE_NAME);
     return true;
+}
+
+/* Is there a board on disk to continue from? */
+bool GameHasSave(void)
+{
+    char path[512];
+    SaveFilePath(path, sizeof(path));
+    return FileExists(path);
 }
 
 /* Plain, line-based, versioned text — easy to read and easy to extend. */

@@ -7,10 +7,19 @@
 /* Action chosen on the menu, returned by MenuUpdate(). */
 typedef enum {
     MENU_ACTION_NONE = 0,
-    MENU_ACTION_START,
+    MENU_ACTION_START,       /* continue from the menu / resume from pause */
+    MENU_ACTION_NEW,         /* start a fresh board                        */
+    MENU_ACTION_SAVE,        /* save the board now                         */
     MENU_ACTION_SETTINGS,
     MENU_ACTION_EXIT
 } MenuAction;
+
+/* One button. The caller owns the array, so the same menu can present
+   different sets (main menu vs the in-game pause menu). */
+typedef struct {
+    const char *label;
+    MenuAction  action;
+} MenuItem;
 
 #define MENU_MAX_ITEMS 8
 
@@ -19,6 +28,7 @@ typedef struct Menu {
     Font titleFont;
     Font buttonFont;
 
+    const MenuItem *items;
     int  itemCount;
     int  selected;
 
@@ -28,16 +38,15 @@ typedef struct Menu {
 
     Rectangle rect[MENU_MAX_ITEMS]; /* button geometry, computed each frame */
 
-    const char *labelOverride[MENU_MAX_ITEMS];  /* NULL = use the default  */
-
     float gridX, gridY;             /* scrolling background grid offsets   */
     float time;                     /* seconds since init                  */
 } Menu;
 
 void       MenuInit(Menu *m, Font titleFont, Font buttonFont);
 
-/* Replace a button's label (NULL restores the default). */
-void       MenuSetLabel(Menu *m, int index, const char *label);
+/* Swap the visible buttons (e.g. RESUME/SAVE when paused). Restarts the
+   intro animation so the menu eases in each time it appears. */
+void       MenuSetItems(Menu *m, const MenuItem *items, int count);
 
 /* The menu's grid scroll offsets (drawn via GridDraw in grid.c). */
 void       MenuUpdateGrid(Menu *m, float dt);

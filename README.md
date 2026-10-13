@@ -20,7 +20,7 @@ carry your throughput along the threads.
 - **Feel** — synthesised sound effects, sale sparks and glowing item dots.
 - Screens switch instantly (no transition fade).
 
-**Version: `V0.0.4`** (shown greyed out in the bottom-left corner).
+**Version: `V0.0.5`** (shown greyed out in the bottom-left corner).
 
 ## Feel
 
@@ -44,15 +44,25 @@ Both files are written next to the executable, so progress survives a restart:
 
 | File | Holds |
 |------|-------|
-| `save.dat` | money, research, pricing counters, view pan/zoom, every node and link |
-| `settings.cfg` | resolution, window mode, vsync, fps limit |
+| `save.dat` | money, research points, unlocks, pricing counters, view pan/zoom, every node and link |
+| `settings.cfg` | resolution, window mode, vsync, fps limit, sound |
 
-The save format is plain, line-based text with a version header
-(`loom-save 1`), so it's easy to read and to migrate later. The board is saved
-**every 15 seconds** while playing and again on exit; settings are saved when
-you leave the SETTINGS screen and on exit. Nodes are renumbered on save, so
-links stay valid even after deletions. Use `--demo` to start from a seeded
-scratch board without touching your save.
+You control when a board starts and when it's kept:
+
+- **Title screen** — `NEW SAVE` starts a fresh board. Once a board exists the
+  screen also offers `CONTINUE`. Picking `NEW SAVE` when a board is already on
+  disk asks `OVERWRITE EXISTING SAVE?` first (`Enter` = yes, `Esc` = no).
+- **Pause menu** (`Esc` in game) — `SAVE` writes the board immediately and shows
+  a brief `SAVED` note.
+- **Autosave** — the board is also written every 15 seconds while playing, and
+  on exit once you've entered it. Merely opening the game and quitting does
+  **not** create a save.
+
+The format is plain, line-based text with a version header (`loom-save 2`), so
+it's easy to read and to migrate later. Unknown lines are ignored and missing
+ones fall back to defaults, so older saves still load. Nodes are renumbered on
+save, so links stay valid even after deletions. Use `--demo` for a seeded
+scratch board that never reads or writes your save.
 
 ## The game loop
 

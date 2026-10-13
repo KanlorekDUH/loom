@@ -81,6 +81,70 @@ static void EnsureBlurTargets(void)
     g_blurOk = (g_fullRT.id != 0 && g_blurRT.id != 0);
 }
 
+/* ---- Menu button sets ------------------------------------------------- */
+/* The same menu presents different buttons depending on context: the title
+   screen (with or without a save on disk) and the in-game pause overlay. */
+static const MenuItem kMenuNoSave[] = {
+    { "NEW SAVE", MENU_ACTION_NEW      },
+    { "SETTINGS", MENU_ACTION_SETTINGS },
+    { "EXIT",     MENU_ACTION_EXIT     },
+};
+static const MenuItem kMenuWithSave[] = {
+    { "CONTINUE", MENU_ACTION_START    },
+    { "NEW SAVE", MENU_ACTION_NEW      },
+    { "SETTINGS", MENU_ACTION_SETTINGS },
+    { "EXIT",     MENU_ACTION_EXIT     },
+};
+static const MenuItem kMenuPaused[] = {
+    { "RESUME",   MENU_ACTION_START    },
+    { "SAVE",     MENU_ACTION_SAVE     },
+    { "SETTINGS", MENU_ACTION_SETTINGS },
+    { "EXIT",     MENU_ACTION_EXIT     },
+};
+
+#define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
+
+static void SetTitleMenu(Menu *m, bool haveSave)
+{
+    if (haveSave) MenuSetItems(m, kMenuWithSave, COUNT_OF(kMenuWithSave));
+    else          MenuSetItems(m, kMenuNoSave,   COUNT_OF(kMenuNoSave));
+}
+
+/* Ask before throwing away an existing board. */
+static void DrawConfirmNew(void)
+{
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), (Color){ 6, 6, 18, 115 });
+
+    const char *title = "OVERWRITE EXISTING SAVE?";
+    const char *hint  = "ENTER  = YES        ESC  = NO";
+
+    float ts = FONT_BUTTON_SIZE * UiScale() * 0.78f;
+    float hs = FONT_UI_SIZE * UiScale() * 1.1f;
+
+    Vector2 t1 = MeasureTextEx(g_buttonFont, title, ts, 1.0f);
+    Vector2 t2 = MeasureTextEx(g_uiFont, hint, hs, 1.0f);
+
+    float cy = ScreenH() * 0.5f;
+    DrawTextEx(g_buttonFont, title,
+               (Vector2){ (ScreenW() - t1.x) * 0.5f, cy - t1.y - 8.0f }, ts, 1.0f, COL_TITLE);
+    DrawTextEx(g_uiFont, hint,
+               (Vector2){ (ScreenW() - t2.x) * 0.5f, cy + 18.0f }, hs, 1.0f, COL_HINT);
+}
+
+/* Brief "SAVED" note after a manual save. */
+static void DrawSavedToast(float t)
+{
+    if (t <= 0.0f) return;
+    float a = (t > 1.0f) ? 1.0f : t;
+
+    const char *msg = "SAVED";
+    float size = FONT_BUTTON_SIZE * UiScale() * 0.7f;
+    Vector2 ts = MeasureTextEx(g_buttonFont, msg, size, 1.0f);
+    DrawTextEx(g_buttonFont, msg,
+               (Vector2){ (ScreenW() - ts.x) * 0.5f, ScreenH() - size - 42.0f },
+               size, 1.0f, (Color){ 120, 214, 150, (unsigned char)(235.0f * a) });
+}
+
 /* ---- Version stamp ---------------------------------------------------- */
 static void DrawVersion(void)
 {
@@ -129,6 +193,9 @@ int main(int argc, char **argv)
     Menu menu;
     MenuInit(&menu, g_titleFont, g_buttonFont);
 
+    bool haveSave = !demo && GameHasSave();
+    SetTitleMenu(&menu, haveSave);
+
     Settings settings;
     SettingsInit(&settings, g_titleFont, g_uiFont);
     SettingsLoad(&settings);                    /* applies saved window settings */
@@ -140,6 +207,9 @@ int main(int argc, char **argv)
     Screen screen         = demo ? SCREEN_GAME : SCREEN_MENU;
     Screen settingsReturn = SCREEN_MENU;        /* where Esc leaves settings */
     bool   gamePaused     = false;              /* in-game menu overlay      */
+    bool   confirmNew     = false;              /* "overwrite save?" prompt  */
+    float  savedFlash     = 0.0f;               /* "SAVED" toast timer       */
+    bool   played         = false;              /* entered the board at least once */
     bool   quit           = false;
     float  autosave       = 0.0f;
 
@@ -159,25 +229,60 @@ int main(int argc, char **argv)
 
         /* ---- Update the active screen --------------------------------- */
         if (screen == SCREEN_MENU) {
-            MenuAction a = MenuUpdate(&menu, dt);
-            if (a != MENU_ACTION_NONE) SfxClick();
-            if (a == MENU_ACTION_START) {
-                screen = SCREEN_GAME;
-            } else if (a == MENU_ACTION_SETTINGS) {
-                settings.appear = 0.0f;
-                settingsReturn = SCREEN_MENU;
-                screen = SCREEN_SETTINGS;
-            } else if (a == MENU_ACTION_EXIT) {
-                quit = true;
+            if (confirmNew) {
+                /* Confirm before wiping an existing board. */
+                bool yes = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
+                           IsKeyPressed(KEY_SPACE) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+                bool no  = IsKeyPressed(KEY_ESCAPE) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
+                if (yes) {
+                    confirmNew = false;
+                    GameNew();
+                    GameSave();
+                    haveSave = true;
+                    played   = true;
+                    SfxUnlock();
+                    screen = SCREEN_GAME;
+                } else if (no) {
+                    confirmNew = false;
+                    SfxClick();
+                }
+            } else {
+                MenuAction a = MenuUpdate(&menu, dt);
+                if (a != MENU_ACTION_NONE) SfxClick();
+                if (a == MENU_ACTION_START) {              /* continue */
+                    played = true;
+                    screen = SCREEN_GAME;
+                } else if (a == MENU_ACTION_NEW) {
+                    if (haveSave) {
+                        confirmNew = true;                 /* ask first */
+                    } else {
+                        GameNew();
+                        GameSave();
+                        haveSave = true;
+                        played   = true;
+                        screen = SCREEN_GAME;
+                    }
+                } else if (a == MENU_ACTION_SETTINGS) {
+                    settings.appear = 0.0f;
+                    settingsReturn = SCREEN_MENU;
+                    screen = SCREEN_SETTINGS;
+                } else if (a == MENU_ACTION_EXIT) {
+                    quit = true;
+                }
             }
         } else if (screen == SCREEN_GAME) {
             if (gamePaused) {
                 /* The menu doubles as the pause menu. */
                 MenuAction a = MenuUpdate(&menu, dt);
                 if (a != MENU_ACTION_NONE) SfxClick();
-                if (a == MENU_ACTION_START) {
+                if (a == MENU_ACTION_START) {              /* resume */
                     gamePaused = false;
-                    MenuSetLabel(&menu, 0, NULL);           /* back to "START" */
+                    SetTitleMenu(&menu, haveSave);
+                } else if (a == MENU_ACTION_SAVE) {
+                    GameSave();
+                    haveSave  = true;
+                    savedFlash = 2.0f;
+                    SfxUnlock();
                 } else if (a == MENU_ACTION_SETTINGS) {
                     settings.appear = 0.0f;
                     settingsReturn = SCREEN_GAME;
@@ -187,13 +292,13 @@ int main(int argc, char **argv)
                 }
                 if (IsKeyPressed(KEY_ESCAPE)) {
                     gamePaused = false;
-                    MenuSetLabel(&menu, 0, NULL);
+                    SetTitleMenu(&menu, haveSave);
                 }
             } else {
                 GameUpdate(dt);
                 if (IsKeyPressed(KEY_ESCAPE)) {
                     gamePaused = true;
-                    MenuSetLabel(&menu, 0, "RESUME");
+                    MenuSetItems(&menu, kMenuPaused, COUNT_OF(kMenuPaused));
                 }
             }
         } else {
@@ -204,6 +309,8 @@ int main(int argc, char **argv)
                 screen = settingsReturn;
             }
         }
+
+        if (savedFlash > 0.0f) savedFlash -= dt;
 
         /* ---- Autosave the board now and then -------------------------- */
         if (screen == SCREEN_GAME && !gamePaused && !demo) {
@@ -261,10 +368,12 @@ int main(int argc, char **argv)
             }
 
             DrawVersion();
+            if (confirmNew) DrawConfirmNew();
+            DrawSavedToast(savedFlash);
         EndDrawing();
     }
 
-    if (!demo) GameSave();                      /* keep the board for next time */
+    if (!demo && played) GameSave();            /* keep the board for next time */
     SettingsSave(&settings);
     AudioClose();
     if (g_fullRT.id != 0) UnloadRenderTexture(g_fullRT);
