@@ -11,6 +11,17 @@ git checkout v0.0.7 && make run
 
 ## Shipped
 
+### v0.0.7-hotfix
+- **Wires keep the same shape at every zoom.** The bezier's minimum handle
+  distance was a fixed screen size, so curve angles drifted as you zoomed;
+  it now scales with zoom like the endpoints do.
+- **The floating `+$X` sale text scales with zoom** like everything else, and
+  drops out at low zoom with the rest of the small text.
+- **Nodes can't be dropped on top of one another** — a drag simply stops when
+  the target cells are occupied.
+- **Shift + drag on empty grid = drag-buy**, laying a run of nodes side by
+  side and skipping cells that are already taken.
+
 ### v0.0.7 — camera, node variety & zoom-out rendering
 - **WASD camera panning** (freed up by v0.0.6). Drag-panning still works.
 - **Nodes of different sizes.** MINER / SMELTER / BROKER are 4×2, SELLER 3×2,

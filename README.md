@@ -130,8 +130,9 @@ with the wheel). Entries with a prerequisite show `LOCKED` until it's bought.
 |-----------------------------------|---------------------------------|
 | `1` / `2` or click a tab          | Switch bar segment (**BUILD** / **RESEARCH**) |
 | Click a node card | Select + arm a node type (click it again to put it away) |
-| Left click empty grid             | Buy + place it (one shot; **hold Shift** to keep placing) |
-| Left drag a node body             | Move it (snaps to the grid)     |
+| Left click empty grid             | Buy + place it. Hold **Shift** to keep the tool armed |
+| **Shift + drag** on empty grid    | **Drag-buy** — lay a run of nodes side by side |
+| Left drag a node body             | Move it (snaps to the grid; nodes can't overlap) |
 | Left drag from an output node     | Wire to another node's input    |
 | Right click                       | Delete a node or wire; on empty space it puts the armed tool away |
 | Right drag from empty space       | Pan                             |

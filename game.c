@@ -180,11 +180,12 @@ static float   g_time;
 static Font    g_font;
 
 /* ---- Interaction state ------------------------------------------------ */
-typedef enum { DRAG_NONE, DRAG_BLOCK, DRAG_WIRE } DragMode;
+typedef enum { DRAG_NONE, DRAG_BLOCK, DRAG_WIRE, DRAG_PAINT } DragMode;
 
 static DragMode  g_drag;
 static int       g_dragBlock;
 static int       g_grabCol, g_grabRow;
+static int       g_paintCol, g_paintRow;   /* last cell placed by a drag-buy */
 static bool      g_panning;
 static bool      g_placing;    /* a node tool is armed for placement */
 
@@ -244,7 +245,9 @@ static float NodeRadius(void) { return fmaxf(1.0f, 7.0f * UiScale() * ZoomScale(
 
 static void WireControls(Vector2 a, Vector2 b, Vector2 *c1, Vector2 *c2)
 {
-    float d = fmaxf(fabsf(b.x - a.x) * 0.5f, 40.0f * UiScale());
+    /* The minimum handle distance scales with zoom, so the curve keeps the
+       same shape — and leaves the node at the same angle — at every zoom. */
+    float d = fmaxf(fabsf(b.x - a.x) * 0.5f, 40.0f * UiScale() * g_zoom);
     *c1 = (Vector2){ a.x + d, a.y };
     *c2 = (Vector2){ b.x - d, b.y };
 }
@@ -421,6 +424,37 @@ static int PlaceNode(NodeType type, int col, int row)
 {
     int idx = AddBlockRaw(type, col, row, 0, 0);
     if (idx >= 0) g_placed[type]++;
+    return idx;
+}
+
+/* Does a node of this type, at this cell, clear every other node?
+   Pass the index of a node being moved so it doesn't collide with itself. */
+static bool BlockFits(int ignore, int col, int row, NodeType t)
+{
+    int w = g_defs[t].w, h = g_defs[t].h;
+
+    for (int i = 0; i < MAX_BLOCKS; i++) {
+        if (i == ignore || !g_blocks[i].active) continue;
+        const NodeDef *d = &g_defs[g_blocks[i].type];
+        if (col < g_blocks[i].col + d->w && col + w > g_blocks[i].col &&
+            row < g_blocks[i].row + d->h && row + h > g_blocks[i].row)
+            return false;                      /* the footprints overlap */
+    }
+    return true;
+}
+
+/* Buy and place — if it's unlocked, affordable and doesn't overlap.
+   Returns the new node's index, or -1. */
+static int TryPlaceNode(NodeType t, int col, int row)
+{
+    if (!g_unlocked[t]) return -1;
+
+    int cost = NodeCost(t);
+    if (cost > g_money) return -1;
+    if (!BlockFits(-1, col, row, t)) return -1;
+
+    int idx = PlaceNode(t, col, row);
+    if (idx >= 0) g_money -= cost;
     return idx;
 }
 
@@ -973,34 +1007,64 @@ void GameUpdate(float dt)
                 g_grabCol = (int)floorf((mouse.x - o.x) / cell);
                 g_grabRow = (int)floorf((mouse.y - o.y) / cell);
             } else if (g_placing) {
-                /* Empty space: buy the armed node and let it be dragged.
-                   Without Shift this is a one-shot placement — the tool
-                   disarms. Hold Shift to keep placing several. */
-                int cost = NodeCost(g_selType);
-                if (g_unlocked[g_selType] && cost <= g_money) {
-                    int idx = PlaceNode(g_selType,
-                                        MouseCellX() - g_defs[g_selType].w / 2,
-                                        MouseCellY() - g_defs[g_selType].h / 2);
-                    if (idx >= 0) {
-                        g_money -= cost;
-                        g_drag = DRAG_BLOCK;
-                        g_dragBlock = idx;
-                        g_grabCol = g_defs[g_selType].w / 2;
-                        g_grabRow = g_defs[g_selType].h / 2;
-                        SfxPlace();
-                        if (!ShiftDown()) g_placing = false;
-                    }
-                } else {
+                /* Empty space: buy the armed node.
+                   - plain click  : place one, then drag it into position
+                   - Shift + drag : paint a run of nodes along the drag
+                   - Shift + click: place one and stay armed to place more */
+                int w = g_defs[g_selType].w, h = g_defs[g_selType].h;
+                int idx = TryPlaceNode((NodeType)g_selType,
+                                       MouseCellX() - w / 2,
+                                       MouseCellY() - h / 2);
+                if (idx < 0) {
                     g_denied = 0.5f;
                     SfxDenied();
+                } else {
+                    SfxPlace();
+                    if (ShiftDown()) {
+                        g_drag     = DRAG_PAINT;
+                        g_paintCol = MouseCellX();
+                        g_paintRow = MouseCellY();
+                    } else {
+                        g_drag      = DRAG_BLOCK;
+                        g_dragBlock = idx;
+                        g_grabCol   = w / 2;
+                        g_grabRow   = h / 2;
+                        g_placing   = false;
+                    }
                 }
             }
         }
     }
 
     if (g_drag == DRAG_BLOCK && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        g_blocks[g_dragBlock].col = MouseCellX() - g_grabCol;
-        g_blocks[g_dragBlock].row = MouseCellY() - g_grabRow;
+        int nc = MouseCellX() - g_grabCol;
+        int nr = MouseCellY() - g_grabRow;
+        /* A node can't be dropped on top of another — if the target is
+           occupied it simply stays where it is. */
+        if (BlockFits(g_dragBlock, nc, nr, g_blocks[g_dragBlock].type)) {
+            g_blocks[g_dragBlock].col = nc;
+            g_blocks[g_dragBlock].row = nr;
+        }
+    }
+
+    /* Shift-drag buy: lay nodes one after another along the drag. */
+    if (g_drag == DRAG_PAINT && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        int w = g_defs[g_selType].w, h = g_defs[g_selType].h;
+        int tc = MouseCellX(), tr = MouseCellY();
+        int guard = 0;
+
+        while ((tc != g_paintCol || tr != g_paintRow) && guard++ < 64) {
+            if (tc > g_paintCol)      g_paintCol++;
+            else if (tc < g_paintCol) g_paintCol--;
+            if (tr > g_paintRow)      g_paintRow++;
+            else if (tr < g_paintRow) g_paintRow--;
+
+            /* Occupied cells just don't take a node, so a drag lays the run
+               out side by side without overlapping. */
+            if (TryPlaceNode((NodeType)g_selType,
+                             g_paintCol - w / 2, g_paintRow - h / 2) >= 0)
+                SfxPlace();
+        }
     }
 
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
@@ -1008,6 +1072,7 @@ void GameUpdate(float dt)
             int in = InNodeAt(mouse);
             if (in >= 0 && AddLink(g_dragBlock, in)) SfxConnect();
         }
+        if (g_drag == DRAG_PAINT && !ShiftDown()) g_placing = false;
         g_drag = DRAG_NONE;
     }
 
@@ -1376,13 +1441,14 @@ void GameDraw(void)
 
         int bi = g_popups[p].block;
         if (!g_blocks[bi].active) { g_popups[p].active = false; continue; }
+        if (g_zoom < LOD_LABEL_ZOOM) continue;      /* too small to read */
 
         Vector2 o = BlockOrigin(bi), s = BlockSizeAt(bi);
         char buf[16];
         snprintf(buf, sizeof(buf), "+$%d", g_popups[p].amount);
-        float fs = FONT_UI_SIZE * UiScale();
+        float fs = FONT_UI_SIZE * UiScale() * ZoomScale();
         Vector2 ts = MeasureTextEx(g_font, buf, fs, 1.0f);
-        float rise = g_popups[p].t * S(40.0f);
+        float rise = g_popups[p].t * S(40.0f) * ZoomScale();
         unsigned char a = (unsigned char)(255.0f * (1.0f - g_popups[p].t));
         DrawTextEx(g_font, buf,
                    (Vector2){ o.x + s.x * 0.5f - ts.x * 0.5f, o.y - rise },
