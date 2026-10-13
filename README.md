@@ -20,7 +20,7 @@ carry your throughput along the threads.
 - **Feel** — synthesised sound effects, sale sparks and glowing item dots.
 - Screens switch instantly (no transition fade).
 
-**Version: `V0.0.5`** (shown greyed out in the bottom-left corner).
+**Version: `V0.0.6`** (shown greyed out in the bottom-left corner).
 
 ## Feel
 
@@ -40,12 +40,21 @@ when you pan and zoom rather than sticking to the screen.
 
 ## Persistence
 
-Both files are written next to the executable, so progress survives a restart:
+Both files live in your **per-user data folder**, outside the project, so they
+survive rebuilds and cleanups:
+
+```
+$XDG_DATA_HOME/loom/    or    ~/.local/share/loom/
+```
 
 | File | Holds |
 |------|-------|
 | `save.dat` | money, research points, unlocks, pricing counters, view pan/zoom, every node and link |
 | `settings.cfg` | resolution, window mode, vsync, fps limit, sound |
+
+Older builds kept these next to the executable. On first run the game still
+looks there, loads what it finds, and writes to the new location from then on —
+so an existing save migrates by itself.
 
 You control when a board starts and when it's kept:
 
@@ -117,7 +126,7 @@ with the wheel). Entries with a prerequisite show `LOCKED` until it's bought.
 | Action                            | Effect                          |
 |-----------------------------------|---------------------------------|
 | `1` / `2` or click a tab          | Switch bar segment (**BUILD** / **RESEARCH**) |
-| Click a node card, or `Q W E R T Y U` | Select + arm a node type (click it again to put it away) |
+| Click a node card | Select + arm a node type (click it again to put it away) |
 | Left click empty grid             | Buy + place it (one shot; **hold Shift** to keep placing) |
 | Left drag a node body             | Move it (snaps to the grid)     |
 | Left drag from an output node     | Wire to another node's input    |

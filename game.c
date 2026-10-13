@@ -15,6 +15,7 @@
 #include "theme.h"
 #include "grid.h"
 #include "audio.h"
+#include "paths.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -30,7 +31,7 @@
 #define BW 4   /* block width  in grid cells */
 #define BH 2   /* block height in grid cells */
 
-#define ZOOM_MIN 0.5f
+#define ZOOM_MIN 0.2f
 #define ZOOM_MAX 2.0f
 
 /* ---- Types ------------------------------------------------------------ */
@@ -198,6 +199,10 @@ static float ClampF(float v, float lo, float hi) { return v < lo ? lo : (v > hi 
 static float CellPx(void) { return GridCell() * g_zoom; }
 static bool  ShiftDown(void) { return IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT); }
 
+/* Detail — node dots, text, item dots — follows the zoom, clamped so it stays
+   legible when zoomed far out. */
+static float ZoomScale(void) { return ClampF(g_zoom, 0.4f, 1.4f); }
+
 /* ---- Geometry --------------------------------------------------------- */
 static Vector2 BlockSize(void) { float c = CellPx(); return (Vector2){ BW * c, BH * c }; }
 
@@ -219,7 +224,7 @@ static Vector2 OutNode(int i)
     return (Vector2){ o.x + s.x, o.y + s.y * 0.5f };
 }
 
-static float NodeRadius(void) { return 7.0f * UiScale(); }
+static float NodeRadius(void) { return 7.0f * UiScale() * ZoomScale(); }
 
 static void WireControls(Vector2 a, Vector2 b, Vector2 *c1, Vector2 *c2)
 {
@@ -733,17 +738,15 @@ void GameSeedDemo(void)
 /* ---- Save / load ------------------------------------------------------ */
 #define SAVE_NAME "save.dat"
 
-static bool SaveFilePath(char *buf, size_t n)
-{
-    snprintf(buf, n, "%s%s", GetApplicationDirectory(), SAVE_NAME);
-    return true;
-}
-
-/* Is there a board on disk to continue from? */
+/* Is there a board to continue from? New location first, then the old one. */
 bool GameHasSave(void)
 {
     char path[512];
-    SaveFilePath(path, sizeof(path));
+
+    DataPath(path, sizeof(path), SAVE_NAME);
+    if (FileExists(path)) return true;
+
+    LegacyPath(path, sizeof(path), SAVE_NAME);
     return FileExists(path);
 }
 
@@ -751,7 +754,7 @@ bool GameHasSave(void)
 void GameSave(void)
 {
     char path[512];
-    SaveFilePath(path, sizeof(path));
+    DataPath(path, sizeof(path), SAVE_NAME);
 
     FILE *f = fopen(path, "w");
     if (!f) return;
@@ -811,9 +814,14 @@ static int ParseInts(const char *s, int *out, int max)
 bool GameLoad(void)
 {
     char path[512];
-    SaveFilePath(path, sizeof(path));
+    DataPath(path, sizeof(path), SAVE_NAME);
 
     FILE *f = fopen(path, "r");
+    if (!f) {
+        /* One-time migration from the old beside-the-executable file. */
+        LegacyPath(path, sizeof(path), SAVE_NAME);
+        f = fopen(path, "r");
+    }
     if (!f) return false;
 
     char line[256];
@@ -902,17 +910,9 @@ void GameUpdate(float dt)
         g_pan.y += d.y;
     }
 
-    /* ---- Bottom bar: tab selection + node palette --------------------- */
+    /* ---- Bottom bar: view tabs (node placement is mouse-only) ---------- */
     if (IsKeyPressed(KEY_ONE)) g_tab = TAB_BUILD;
     if (IsKeyPressed(KEY_TWO)) g_tab = TAB_RESEARCH;
-
-    if (g_tab == TAB_BUILD) {
-        static const int keys[NODE_TYPE_COUNT] = {
-            KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U
-        };
-        for (int t = 0; t < NODE_TYPE_COUNT; t++)
-            if (IsKeyPressed(keys[t]) && g_unlocked[t]) ToggleTool((NodeType)t);
-    }
 
     /* ---- Left button -------------------------------------------------- */
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -1034,7 +1034,7 @@ static void DrawBlock(int i)
     }
 
     /* Label, with the throughput underneath it. */
-    float zoomTxt = ClampF(g_zoom, 0.7f, 1.3f);
+    float zoomTxt = ZoomScale();
     float fs = FONT_ROW_SIZE * UiScale() * 0.8f * zoomTxt;
     Vector2 ts = MeasureTextEx(g_font, b->label, fs, 1.0f);
     DrawTextEx(g_font, b->label,
@@ -1050,15 +1050,18 @@ static void DrawBlock(int i)
                rs, 1.0f, (Color){ 150, 156, 180, 190 });
 
     /* Buffered items: input along the top-left, output along the top-right. */
-    float dot = fmaxf(2.0f, S(4.0f));
+    float zs   = ZoomScale();
+    float dot  = fmaxf(1.0f, S(4.0f) * zs);
     float step = dot * 3.0f;
+    float dox  = S(14.0f) * zs;
+    float doy  = S(12.0f) * zs;
     for (int k = 0; k < b->inCount; k++) {
         if (def->accepts == ITEM_NONE) break;
-        DrawCircleV((Vector2){ r.x + S(14.0f) + k * step, r.y + S(12.0f) }, dot, ItemColor(def->accepts));
+        DrawCircleV((Vector2){ r.x + dox + k * step, r.y + doy }, dot, ItemColor(def->accepts));
     }
     for (int k = 0; k < b->outCount; k++) {
         if (def->provides == ITEM_NONE) break;
-        DrawCircleV((Vector2){ r.x + r.width - S(14.0f) - k * step, r.y + S(12.0f) }, dot, ItemColor(def->provides));
+        DrawCircleV((Vector2){ r.x + r.width - dox - k * step, r.y + doy }, dot, ItemColor(def->provides));
     }
 }
 
@@ -1124,12 +1127,6 @@ static void DrawCard(int t)
     }
     DrawTextEx(g_font, costStr, (Vector2){ r.x + S(14.0f), r.y + r.height - cs - S(10.0f) },
                cs, 1.0f, cc);
-
-    static const char *keys[NODE_TYPE_COUNT] = { "Q", "W", "E", "R", "T", "Y", "U" };
-    Vector2 ks = MeasureTextEx(g_font, keys[t], cs, 1.0f);
-    DrawTextEx(g_font, keys[t],
-               (Vector2){ r.x + r.width - ks.x - S(12.0f), r.y + S(11.0f) },
-               cs, 1.0f, (Color){ 255, 255, 255, 70 });
 }
 
 static void DrawBars(void)
@@ -1366,12 +1363,8 @@ void GameDraw(void)
                fs, 1.0f, (Color){ 186, 150, 240, 230 });
     lineY += fs + S(4.0f);
 
-    int nodes = 0, links = 0;
-    for (int i = 0; i < MAX_BLOCKS; i++) if (g_blocks[i].active) nodes++;
-    for (int k = 0; k < MAX_LINKS;  k++) if (g_links[k].active)  links++;
-    char stats[48];
-    snprintf(stats, sizeof(stats), "NODES %d   LINKS %d   ZOOM %d%%",
-             nodes, links, (int)lroundf(g_zoom * 100.0f));
+    char stats[32];
+    snprintf(stats, sizeof(stats), "ZOOM %d%%", (int)lroundf(g_zoom * 100.0f));
     Vector2 st = MeasureTextEx(g_font, stats, fs, 1.0f);
     DrawTextEx(g_font, stats, (Vector2){ ScreenW() - st.x - S(24.0f), lineY },
                fs, 1.0f, COL_HINT);

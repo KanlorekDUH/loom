@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "theme.h"
 #include "audio.h"
+#include "paths.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -119,15 +120,10 @@ static void ChangeValue(Settings *s, int dir)
 /* ---- Persistence ------------------------------------------------------ */
 #define SETTINGS_NAME "settings.cfg"
 
-static void SettingsPath(char *buf, size_t n)
-{
-    snprintf(buf, n, "%s%s", GetApplicationDirectory(), SETTINGS_NAME);
-}
-
 void SettingsSave(const Settings *s)
 {
     char path[512];
-    SettingsPath(path, sizeof(path));
+    DataPath(path, sizeof(path), SETTINGS_NAME);
 
     FILE *f = fopen(path, "w");
     if (!f) return;
@@ -146,9 +142,14 @@ void SettingsSave(const Settings *s)
 void SettingsLoad(Settings *s)
 {
     char path[512];
-    SettingsPath(path, sizeof(path));
+    DataPath(path, sizeof(path), SETTINGS_NAME);
 
     FILE *f = fopen(path, "r");
+    if (!f) {
+        /* One-time migration from the old beside-the-executable file. */
+        LegacyPath(path, sizeof(path), SETTINGS_NAME);
+        f = fopen(path, "r");
+    }
     if (!f) return;
 
     char line[128];

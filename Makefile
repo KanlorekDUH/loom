@@ -13,7 +13,7 @@ endif
 CFLAGS += $(RAYLIB_CFLAGS)
 
 TARGET := loom
-SRCS   := main.c menu.c settings.c game.c grid.c audio.c
+SRCS   := main.c menu.c settings.c game.c grid.c audio.c paths.c
 OBJS   := $(SRCS:.c=.o)
 DEPS   := $(OBJS:.o=.d)
 
