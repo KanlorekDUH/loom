@@ -20,7 +20,7 @@ carry your throughput along the threads.
 - **Feel** — synthesised sound effects, sale sparks and glowing item dots.
 - Screens switch instantly (no transition fade).
 
-**Version: `V0.0.8`** (shown greyed out in the bottom-left corner).
+**Version: `V0.0.9`** (shown greyed out in the bottom-left corner).
 
 ## Feel
 
@@ -128,7 +128,7 @@ with the wheel). Entries with a prerequisite show `LOCKED` until it's bought.
 
 | Action                            | Effect                          |
 |-----------------------------------|---------------------------------|
-| `1` / `2` or click a tab          | Switch bar segment (**BUILD** / **RESEARCH**) |
+| `1` / `2` / `3` or click a tab   | Switch bar segment (**BUILD** / **RESEARCH** / **QUESTS**) |
 | Click a node card | Select + arm a node type (click it again to put it away) |
 | Left click empty grid             | Buy + place it. Hold **Shift** to keep the tool armed |
 | **Shift + drag** on empty grid    | **Drag-buy** — lay a run of nodes side by side |
@@ -162,6 +162,26 @@ The **RESEARCH** segment of the bottom bar sells one-time upgrades for money:
 Click a row to buy it (it flashes the money red if you can't afford it yet).
 Owned upgrades are outlined in green. Costs, notes and effects live in the
 `g_res*` arrays and `NodeInterval()` / `SellValue()` in `game.c`.
+
+## Quests
+
+The **QUESTS** segment of the bottom bar lists one-off objectives. They complete
+themselves the moment your factory reaches the target — there is nothing to
+accept or hand in — and they pay out money and/or RP.
+
+| Quest | Target | Reward |
+|-------|--------|--------|
+| PLACE 3 MINERS    | 3 miners on the board    | $150 |
+| SELL 50 ITEMS     | 50 sales, ever           | $300 |
+| BUILD A FORGE     | 1 forge on the board     | 40 RP |
+| EARN $2000        | $2000 earned from sales  | 60 RP |
+| UNLOCK 3 RESEARCH | 3 research entries owned | $500 |
+| PLACE 10 NODES    | 10 nodes on the board    | 80 RP |
+
+Completing one shows a **QUEST COMPLETE** banner and grants its reward
+immediately. Completion state and the lifetime sale/earnings counters behind
+the quests are saved with the board. The definitions live in `g_quests[]` at
+the top of `game.c`.
 
 ## In-game menu
 

@@ -11,6 +11,17 @@ git checkout v0.0.7 && make run
 
 ## Shipped
 
+### v0.0.9 — quests
+- A third bar segment, **QUESTS**, lists six one-off objectives (place N miners,
+  sell N items, earn $N, own N research…).
+- They complete themselves when the target is reached and pay money and/or RP,
+  with a **QUEST COMPLETE** banner.
+- Lifetime sale and earnings counters were added to drive them; completion state
+  and the counters are saved with the board.
+- These move into the top-left QUESTS panel at v0.1.0. The data model is shared
+  with, and was a rehearsal for, v0.1.1's contracts (objectives with
+  requirements you have to *sustain* rather than reach once).
+
 ### v0.0.8 — rewiring
 - **Dragging a connected input unplugs that wire.** From there, dropping it on
   another input **re-routes** it, and releasing over empty space **disconnects**
@@ -58,10 +69,6 @@ git checkout v0.0.7 && make run
 ---
 
 ## Planned
-
-### v0.0.9 — quests
-- Objectives with rewards, and the QUESTS panel that will sit top-left in the
-  v0.1.0 layout.
 
 ### v0.1.0 — UI overhaul (milestone)
 A more in-game-focussed layout, with the menu restyled to match:

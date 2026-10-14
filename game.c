@@ -53,8 +53,8 @@ typedef enum {
 
 /* Bottom bar segments. BUILD holds the node palette; the layout is
    data-driven so more tabs can be appended later. */
-typedef enum { TAB_BUILD = 0, TAB_RESEARCH, TAB_COUNT } Tab;
-static const char *g_tabNames[TAB_COUNT] = { "BUILD", "RESEARCH" };
+typedef enum { TAB_BUILD = 0, TAB_RESEARCH, TAB_QUESTS, TAB_COUNT } Tab;
+static const char *g_tabNames[TAB_COUNT] = { "BUILD", "RESEARCH", "QUESTS" };
 
 typedef struct {
     const char *name;
@@ -115,6 +115,43 @@ static const bool  g_lockedByDefault[NODE_TYPE_COUNT] = {
 };
 static bool        g_unlocked[NODE_TYPE_COUNT];
 static int         g_rp;                       /* research points          */
+
+/* ---- Quests (one-off objectives with rewards) ------------------------- */
+/* A quest completes itself the moment the factory reaches the target, so
+   there is nothing to accept or hand in. */
+typedef enum {
+    QUEST_NODES_TOTAL = 0,   /* nodes on the board                */
+    QUEST_TYPE_COUNT,        /* nodes of one type                 */
+    QUEST_TOTAL_SOLD,        /* items sold, ever                  */
+    QUEST_TOTAL_EARNED,      /* money earned from sales, ever     */
+    QUEST_RESEARCH_COUNT     /* research entries owned            */
+} QuestKind;
+
+typedef struct {
+    const char *label;
+    QuestKind   kind;
+    int         arg;         /* node type, for QUEST_TYPE_COUNT   */
+    int         target;
+    int         rewardMoney;
+    int         rewardRp;
+    bool        done;
+} Quest;
+
+#define QUEST_COUNT 6
+
+static Quest g_quests[QUEST_COUNT] = {
+    { "PLACE 3 MINERS",     QUEST_TYPE_COUNT,    NODE_MINER,   3,  150,  0, false },
+    { "SELL 50 ITEMS",      QUEST_TOTAL_SOLD,    0,           50,  300,  0, false },
+    { "BUILD A FORGE",      QUEST_TYPE_COUNT,    NODE_FORGE,   1,    0, 40, false },
+    { "EARN $2000",         QUEST_TOTAL_EARNED,  0,         2000,    0, 60, false },
+    { "UNLOCK 3 RESEARCH",  QUEST_RESEARCH_COUNT,0,            3,  500,  0, false },
+    { "PLACE 10 NODES",     QUEST_NODES_TOTAL,   0,           10,    0, 80, false },
+};
+
+static int  g_soldTotal;                       /* items sold, ever         */
+static int  g_earnedTotal;                     /* money earned, ever       */
+static float g_questFlash;                     /* completion banner timer  */
+static char  g_questFlashText[64];
 
 /* Upgrades and nearby booster nodes feed straight into the node stats. */
 static int SellValue(NodeType t)
@@ -194,10 +231,12 @@ static Rectangle g_tabs[TAB_COUNT];
 static Rectangle g_panel;
 static Rectangle g_cards[NODE_TYPE_COUNT];
 static Rectangle g_resRows[RESEARCH_COUNT];
+static Rectangle g_questRows[QUEST_COUNT];
 static int       g_resScroll;                  /* first visible research row */
+static int       g_questScroll;                /* first visible quest row    */
 static Rectangle g_hotbar;     /* whole bar area — clicks here never hit the world */
 
-#define RES_VISIBLE 4          /* research rows shown at once */
+#define LIST_VISIBLE 4         /* rows shown at once in a list panel */
 
 /* ---- Small helpers ---------------------------------------------------- */
 static float S(float v) { return v * UiScale(); }
@@ -317,26 +356,30 @@ static void LayoutBars(void)
                                   cardW, cardH };
     }
 
-    /* Research rows, offset by the scroll position. */
+    /* List rows (research and quests share the same geometry). */
     float rowH = S(36.0f), rowGap = S(8.0f), rowPad = S(16.0f);
-    float rowsH = RES_VISIBLE * rowH + (RES_VISIBLE - 1) * rowGap;
+    float rowsH = LIST_VISIBLE * rowH + (LIST_VISIBLE - 1) * rowGap;
     float ry = g_panel.y + (g_panel.height - rowsH) * 0.5f;
     for (int i = 0; i < RESEARCH_COUNT; i++)
         g_resRows[i] = (Rectangle){ g_panel.x + rowPad,
                                     ry + (i - g_resScroll) * (rowH + rowGap),
                                     g_panel.width - rowPad * 2.0f, rowH };
+    for (int i = 0; i < QUEST_COUNT; i++)
+        g_questRows[i] = (Rectangle){ g_panel.x + rowPad,
+                                      ry + (i - g_questScroll) * (rowH + rowGap),
+                                      g_panel.width - rowPad * 2.0f, rowH };
 
     g_hotbar = (Rectangle){ g_panel.x, g_panel.y, g_panel.width,
                             (g_tabRow.y + g_tabRow.height) - g_panel.y };
 }
 
-static void ScrollResearch(float wheel)
+static void ScrollList(int *scroll, int count, float wheel)
 {
-    int maxScroll = RESEARCH_COUNT - RES_VISIBLE;
+    int maxScroll = count - LIST_VISIBLE;
     if (maxScroll < 0) maxScroll = 0;
-    g_resScroll -= (int)lroundf(wheel);
-    if (g_resScroll < 0)         g_resScroll = 0;
-    if (g_resScroll > maxScroll) g_resScroll = maxScroll;
+    *scroll -= (int)lroundf(wheel);
+    if (*scroll < 0)         *scroll = 0;
+    if (*scroll > maxScroll) *scroll = maxScroll;
 }
 
 static int TabAt(Vector2 p)
@@ -588,6 +631,49 @@ static int LinkAt(Vector2 p)
     return -1;
 }
 
+/* ---- Quests ----------------------------------------------------------- */
+static int QuestProgress(const Quest *q)
+{
+    switch (q->kind) {
+        case QUEST_NODES_TOTAL: {
+            int n = 0;
+            for (int i = 0; i < MAX_BLOCKS; i++) if (g_blocks[i].active) n++;
+            return n;
+        }
+        case QUEST_TYPE_COUNT: {
+            int n = 0;
+            for (int i = 0; i < MAX_BLOCKS; i++)
+                if (g_blocks[i].active && (int)g_blocks[i].type == q->arg) n++;
+            return n;
+        }
+        case QUEST_TOTAL_SOLD:   return g_soldTotal;
+        case QUEST_TOTAL_EARNED: return g_earnedTotal;
+        case QUEST_RESEARCH_COUNT: {
+            int n = 0;
+            for (int r = 0; r < RESEARCH_COUNT; r++) if (g_resOwned[r]) n++;
+            return n;
+        }
+        default: return 0;
+    }
+}
+
+/* Quests complete themselves as soon as the target is reached. */
+static void CheckQuests(void)
+{
+    for (int i = 0; i < QUEST_COUNT; i++) {
+        Quest *q = &g_quests[i];
+        if (q->done) continue;
+        if (QuestProgress(q) < q->target) continue;
+
+        q->done = true;
+        g_money += q->rewardMoney;
+        g_rp    += q->rewardRp;
+        g_questFlash = 4.0f;
+        snprintf(g_questFlashText, sizeof(g_questFlashText), "%s", q->label);
+        SfxUnlock();
+    }
+}
+
 /* ---- Simulation ------------------------------------------------------- */
 /* How long this node takes per operation, after research and any BOOSTER
    nodes in range. Every booster stacks another 25%. */
@@ -653,6 +739,8 @@ static void Simulate(float dt)
                     int value = SellValue(b->type);
                     g_money += value;
                     g_rp += (value / RP_DIVISOR > 0) ? value / RP_DIVISOR : 1;
+                    g_soldTotal++;
+                    g_earnedTotal += value;
                     MarkSale(value);
                     MarkDone(b);
                     SpawnPopup(i, value);
@@ -736,6 +824,10 @@ static void Simulate(float dt)
         pt->life -= dt;
         if (pt->life <= 0.0f) pt->active = false;
     }
+
+    /* --- Quests, and the completion banner ----------------------------- */
+    CheckQuests();
+    if (g_questFlash > 0.0f) g_questFlash -= dt;
 }
 
 /* ---- Public API ------------------------------------------------------- */
@@ -752,6 +844,11 @@ void GameNew(void)
 
     g_money   = 0;
     g_rp      = 0;
+    g_soldTotal   = 0;
+    g_earnedTotal = 0;
+    g_questFlash  = 0.0f;
+    g_questScroll = 0;
+    for (int i = 0; i < QUEST_COUNT; i++) g_quests[i].done = false;
     g_moneyRate  = 0.0f;
     g_moneyLastDone = 0.0f;
     g_time = 0.0f;
@@ -818,9 +915,13 @@ void GameSave(void)
     FILE *f = fopen(path, "w");
     if (!f) return;
 
-    fprintf(f, "loom-save 2\n");
+    fprintf(f, "loom-save 3\n");
     fprintf(f, "money %d\n", g_money);
     fprintf(f, "rp %d\n", g_rp);
+    fprintf(f, "totals %d %d\n", g_soldTotal, g_earnedTotal);
+    fprintf(f, "quests");
+    for (int i = 0; i < QUEST_COUNT; i++) fprintf(f, " %d", g_quests[i].done ? 1 : 0);
+    fprintf(f, "\n");
     fprintf(f, "placed");
     for (int t = 0; t < NODE_TYPE_COUNT; t++) fprintf(f, " %d", g_placed[t]);
     fprintf(f, "\n");
@@ -899,6 +1000,15 @@ bool GameLoad(void)
             if (sscanf(line + 6, "%d", &a) == 1 && a >= 0) g_money = a;
         } else if (strncmp(line, "rp ", 3) == 0) {
             if (sscanf(line + 3, "%d", &a) == 1 && a >= 0) g_rp = a;
+        } else if (strncmp(line, "totals ", 7) == 0) {
+            if (sscanf(line + 7, "%d %d", &a, &b) == 2) {
+                g_soldTotal   = (a < 0) ? 0 : a;
+                g_earnedTotal = (b < 0) ? 0 : b;
+            }
+        } else if (strncmp(line, "quests", 6) == 0) {
+            int v[QUEST_COUNT];
+            int n = ParseInts(line + 6, v, QUEST_COUNT);
+            for (int i = 0; i < n; i++) g_quests[i].done = (v[i] != 0);
         } else if (strncmp(line, "placed", 6) == 0) {
             int v[NODE_TYPE_COUNT];
             int n = ParseInts(line + 6, v, NODE_TYPE_COUNT);
@@ -942,8 +1052,10 @@ void GameUpdate(float dt)
     /* ---- Zoom / research scroll with the wheel ------------------------ */
     float wheel = GetMouseWheelMove();
     bool overBars = CheckCollisionPointRec(mouse, g_hotbar);
-    if (wheel != 0.0f && g_tab == TAB_RESEARCH && overBars) {
-        ScrollResearch(wheel);
+    if (wheel != 0.0f && overBars && g_tab == TAB_RESEARCH) {
+        ScrollList(&g_resScroll, RESEARCH_COUNT, wheel);
+    } else if (wheel != 0.0f && overBars && g_tab == TAB_QUESTS) {
+        ScrollList(&g_questScroll, QUEST_COUNT, wheel);
     } else if (wheel != 0.0f && !overBars) {
         float newZoom = ClampF(g_zoom + wheel * 0.1f, ZOOM_MIN, ZOOM_MAX);
         if (newZoom != g_zoom) {
@@ -986,8 +1098,9 @@ void GameUpdate(float dt)
     }
 
     /* ---- Bottom bar: view tabs (node placement is mouse-only) ---------- */
-    if (IsKeyPressed(KEY_ONE)) g_tab = TAB_BUILD;
-    if (IsKeyPressed(KEY_TWO)) g_tab = TAB_RESEARCH;
+    if (IsKeyPressed(KEY_ONE))   g_tab = TAB_BUILD;
+    if (IsKeyPressed(KEY_TWO))   g_tab = TAB_RESEARCH;
+    if (IsKeyPressed(KEY_THREE)) g_tab = TAB_QUESTS;
 
     /* ---- Left button -------------------------------------------------- */
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -1268,6 +1381,24 @@ static void DrawCard(int t)
                cs, 1.0f, cc);
 }
 
+static void DrawListScrollbar(int count, int scroll)
+{
+    if (count <= LIST_VISIBLE) return;
+
+    float trackY = g_panel.y + S(12.0f);
+    float trackH = g_panel.height - S(24.0f);
+    float thumbH = trackH * (float)LIST_VISIBLE / (float)count;
+    int   maxScroll = count - LIST_VISIBLE;
+    float t = (maxScroll > 0) ? (float)scroll / (float)maxScroll : 0.0f;
+    float bx = g_panel.x + g_panel.width - S(9.0f);
+
+    DrawRectangle((int)bx, (int)trackY, (int)fmaxf(2.0f, S(2.0f)), (int)trackH,
+                  (Color){ 255, 255, 255, 18 });
+    DrawRectangle((int)bx, (int)(trackY + (trackH - thumbH) * t),
+                  (int)fmaxf(2.0f, S(2.0f)), (int)thumbH,
+                  (Color){ 255, 255, 255, 70 });
+}
+
 static void DrawBars(void)
 {
     /* Active tab's panel. */
@@ -1276,7 +1407,7 @@ static void DrawBars(void)
 
     if (g_tab == TAB_BUILD) {
         for (int t = 0; t < NODE_TYPE_COUNT; t++) DrawCard(t);
-    } else {
+    } else if (g_tab == TAB_RESEARCH) {
         Vector2 mouse = GetMousePosition();
         float nameSize  = FONT_ROW_SIZE * UiScale() * 0.66f;
         float smallSize = FONT_UI_SIZE * UiScale() * 0.92f;
@@ -1325,20 +1456,59 @@ static void DrawBars(void)
         }
         EndScissorMode();
 
-        /* Scrollbar, only when the list overflows. */
-        if (RESEARCH_COUNT > RES_VISIBLE) {
-            float trackY = g_panel.y + S(12.0f);
-            float trackH = g_panel.height - S(24.0f);
-            float thumbH = trackH * (float)RES_VISIBLE / (float)RESEARCH_COUNT;
-            int   maxScroll = RESEARCH_COUNT - RES_VISIBLE;
-            float t = (maxScroll > 0) ? (float)g_resScroll / (float)maxScroll : 0.0f;
-            float bx = g_panel.x + g_panel.width - S(9.0f);
-            DrawRectangle((int)bx, (int)trackY, (int)fmaxf(2.0f, S(2.0f)), (int)trackH,
-                          (Color){ 255, 255, 255, 18 });
-            DrawRectangle((int)bx, (int)(trackY + (trackH - thumbH) * t),
-                          (int)fmaxf(2.0f, S(2.0f)), (int)thumbH,
-                          (Color){ 255, 255, 255, 70 });
+        DrawListScrollbar(RESEARCH_COUNT, g_resScroll);
+    } else {
+        /* Quests complete themselves, so the rows are read-only. */
+        float nameSize  = FONT_ROW_SIZE * UiScale() * 0.66f;
+        float smallSize = FONT_UI_SIZE * UiScale() * 0.92f;
+
+        BeginScissorMode((int)g_panel.x, (int)g_panel.y,
+                         (int)g_panel.width, (int)g_panel.height);
+
+        for (int i = 0; i < QUEST_COUNT; i++) {
+            Rectangle r = g_questRows[i];
+            if (r.y + r.height < g_panel.y || r.y > g_panel.y + g_panel.height) continue;
+
+            const Quest *q = &g_quests[i];
+            bool done = q->done;
+
+            DrawRectangleLinesEx(r, fmaxf(1.0f, S(1.0f)),
+                                 done ? (Color){ 120, 214, 150, 80 }
+                                      : (Color){ 255, 255, 255, 28 });
+
+            Vector2 ns = MeasureTextEx(g_font, q->label, nameSize, 1.0f);
+            DrawTextEx(g_font, q->label,
+                       (Vector2){ r.x + S(14.0f), r.y + (r.height - ns.y) * 0.5f },
+                       nameSize, 1.0f,
+                       done ? (Color){ 150, 155, 175, 170 } : COL_BTN_TEXT);
+
+            char reward[48];
+            if (q->rewardMoney && q->rewardRp)
+                snprintf(reward, sizeof(reward), "$%d + %d RP", q->rewardMoney, q->rewardRp);
+            else if (q->rewardMoney)
+                snprintf(reward, sizeof(reward), "$%d", q->rewardMoney);
+            else
+                snprintf(reward, sizeof(reward), "%d RP", q->rewardRp);
+
+            DrawTextEx(g_font, reward,
+                       (Vector2){ r.x + S(14.0f) + ns.x + S(16.0f),
+                                  r.y + (r.height - smallSize) * 0.5f },
+                       smallSize, 1.0f, (Color){ 120, 214, 150, 180 });
+
+            char prog[24];
+            if (done) snprintf(prog, sizeof(prog), "DONE");
+            else      snprintf(prog, sizeof(prog), "%d / %d", QuestProgress(q), q->target);
+
+            Vector2 ps = MeasureTextEx(g_font, prog, smallSize, 1.0f);
+            DrawTextEx(g_font, prog,
+                       (Vector2){ r.x + r.width - ps.x - S(14.0f),
+                                  r.y + (r.height - smallSize) * 0.5f },
+                       smallSize, 1.0f,
+                       done ? (Color){ 120, 214, 150, 255 } : COL_HINT);
         }
+        EndScissorMode();
+
+        DrawListScrollbar(QUEST_COUNT, g_questScroll);
     }
 
     /* Segmented tab bar. */
@@ -1508,6 +1678,24 @@ void GameDraw(void)
     Vector2 st = MeasureTextEx(g_font, stats, fs, 1.0f);
     DrawTextEx(g_font, stats, (Vector2){ ScreenW() - st.x - S(24.0f), lineY },
                fs, 1.0f, COL_HINT);
+
+    /* Quest completion banner. */
+    if (g_questFlash > 0.0f) {
+        float a  = ClampF(g_questFlash, 0.0f, 1.0f);
+        float hs = FONT_BUTTON_SIZE * UiScale() * 0.8f;
+        float ns = FONT_UI_SIZE * UiScale() * 1.1f;
+        float cy = S(70.0f);
+
+        const char *head = "QUEST COMPLETE";
+        Vector2 hz = MeasureTextEx(g_font, head, hs, 1.0f);
+        Vector2 nz = MeasureTextEx(g_font, g_questFlashText, ns, 1.0f);
+
+        DrawTextEx(g_font, head, (Vector2){ (ScreenW() - hz.x) * 0.5f, cy },
+                   hs, 1.0f, (Color){ 120, 214, 150, (unsigned char)(235.0f * a) });
+        DrawTextEx(g_font, g_questFlashText,
+                   (Vector2){ (ScreenW() - nz.x) * 0.5f, cy + hs + S(6.0f) },
+                   ns, 1.0f, (Color){ 220, 226, 245, (unsigned char)(210.0f * a) });
+    }
 
     DrawBars();
 }
