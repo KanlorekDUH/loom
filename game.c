@@ -561,6 +561,15 @@ static int OutNodeAt(Vector2 p)
     return -1;
 }
 
+/* The wire currently plugged into this node's input, if any — the most
+   recently made one. */
+static int LinkIntoInput(int node)
+{
+    for (int k = MAX_LINKS - 1; k >= 0; k--)
+        if (g_links[k].active && g_links[k].to == node) return k;
+    return -1;
+}
+
 static int LinkAt(Vector2 p)
 {
     float thr = 10.0f * UiScale();
@@ -994,10 +1003,22 @@ void GameUpdate(float dt)
             TryBuyResearch(rese);
         } else if (!CheckCollisionPointRec(mouse, g_hotbar)) {
             int out = OutNodeAt(mouse);
+            int in  = InNodeAt(mouse);
             int blk = BlockAt(mouse);
             float cell = CellPx();
 
-            if (out >= 0) {
+            /* Grabbing an input that already has a wire unplugs it, so it can
+               be re-routed (drop on another input) or disconnected (drop on
+               empty space). An input with no wire falls through and moves the
+               node instead, and an output always wins if the two overlap. */
+            int unplug = (in >= 0) ? LinkIntoInput(in) : -1;
+
+            if (unplug >= 0) {
+                g_drag      = DRAG_WIRE;
+                g_dragBlock = g_links[unplug].from;   /* carry on from the source */
+                g_links[unplug].active = false;
+                SfxDelete();
+            } else if (out >= 0) {
                 g_drag = DRAG_WIRE;
                 g_dragBlock = out;
             } else if (blk >= 0) {

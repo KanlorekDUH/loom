@@ -11,6 +11,14 @@ git checkout v0.0.7 && make run
 
 ## Shipped
 
+### v0.0.8 — rewiring
+- **Dragging a connected input unplugs that wire.** From there, dropping it on
+  another input **re-routes** it, and releasing over empty space **disconnects**
+  it. Right-clicking a wire still deletes it too.
+- An input with no wire on it falls through to the old behaviour, so grabbing
+  an empty input still moves the node. An output wins if a connector and an
+  output land on the same spot.
+
 ### v0.0.7-hotfix
 - **Wires keep the same shape at every zoom.** The bezier's minimum handle
   distance was a fixed screen size, so curve angles drifted as you zoomed;
@@ -51,10 +59,6 @@ git checkout v0.0.7 && make run
 
 ## Planned
 
-### v0.0.8 — rewiring
-- **Drag off a connected input** to detach that link. Drop it on **another
-  input** to re-route, or release over nothing to **disconnect**.
-
 ### v0.0.9 — quests
 - Objectives with rewards, and the QUESTS panel that will sit top-left in the
   v0.1.0 layout.
@@ -84,6 +88,48 @@ A more in-game-focussed layout, with the menu restyled to match:
 
 Still to pin down: whether board nodes also become circles, whether the view
 switcher fully replaces the bottom tabs, and how deep the tree goes.
+
+### v0.1.1 — contracts & shipping
+*Idea raised after v0.0.7.* The game already **reports** rates (`41/M` per node,
+`$/MIN` in the HUD); contracts make something **require** one.
+
+- **CONTRACTS** — a dedicated button in the v0.1.0 bar opens the list of
+  available contracts. A contract asks you to **hold a rate for a duration**
+  (*"0.8 iron/s for 0:45"*); completing it pays out money and/or RP.
+- Contracts are a **fixed set, unlocked through the research tree** — not a
+  rolling or expiring list.
+- **SHIPPER node** — a new node that does **not** sell for money. Items fed
+  into it are **consumed** and counted toward the contract it is assigned to,
+  so the chain becomes `… → SHIPPER → contract → reward`.
+- **Only one shipper may exist, for the whole save.** With a single shipper the
+  choice of *which* contract to feed becomes a real decision. It serves one
+  contract at a time.
+  *(Reading to confirm: at most one at a time, so deleting it frees the slot to
+  place it elsewhere — rather than a hard one-placement-per-save limit.)*
+
+### v0.1.2 — multi-input nodes
+- Nodes accept **more than one item type**, each with its own connector and
+  buffer — e.g. a **FURNACE** that takes **ORE + COAL**.
+- This is a real model change: today a node has exactly one `accepts` type and
+  one input buffer. It touches the node definition, block state, the drawn
+  connectors, wire routing/hit-testing and the save format.
+- Introduced alongside a recipe that uses items which already exist, so it's
+  usable the moment it lands.
+
+### v0.1.3 — the mining branch
+- A **big research-tree branch dedicated to mining**: several miner node types,
+  each producing a **different ore** — and the ores need not be real ones,
+  which leaves room for invention.
+- Each new ore brings its own chain, so this is where the research tree really
+  starts to grow.
+- Deliberately **not** one miner with a type dropdown: separate node types,
+  unlocked through the tree.
+
+**Ordering matters here.** Rather than landing multi-input with an arbitrary
+recipe, it arrives *together with* **COAL**: a COAL miner plus a FURNACE that
+takes **ORE + COAL** to make steel. That way the very first multi-input node is
+the one that motivated the feature. The wider mining branch (v0.1.3) then adds
+more ores on top of a foundation that already works.
 
 ---
 

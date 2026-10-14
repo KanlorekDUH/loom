@@ -20,7 +20,7 @@ carry your throughput along the threads.
 - **Feel** — synthesised sound effects, sale sparks and glowing item dots.
 - Screens switch instantly (no transition fade).
 
-**Version: `V0.0.7`** (shown greyed out in the bottom-left corner).
+**Version: `V0.0.8`** (shown greyed out in the bottom-left corner).
 
 ## Feel
 
@@ -134,6 +134,7 @@ with the wheel). Entries with a prerequisite show `LOCKED` until it's bought.
 | **Shift + drag** on empty grid    | **Drag-buy** — lay a run of nodes side by side |
 | Left drag a node body             | Move it (snaps to the grid; nodes can't overlap) |
 | Left drag from an output node     | Wire to another node's input    |
+| Left drag from a **connected input** | **Unplug** that wire — drop it on another input to re-route, or on empty space to disconnect |
 | Right click                       | Delete a node or wire; on empty space it puts the armed tool away |
 | Right drag from empty space       | Pan                             |
 | Middle drag                       | Pan                             |
